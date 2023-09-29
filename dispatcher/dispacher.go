@@ -94,6 +94,20 @@ func (d *dispatcher) CreateObject(id, originType string, body *easyjson.JSON) er
 	return d.createObject(id, originType, body)
 }
 
+/*
+ 0. maybe validate all names
+ 1. check that all object's types exists
+ 2. check links:
+    2.1. if it TYPES:
+    2.1.1. check "From" and "To" in `types`
+    2.1.2. check that link type is not empty
+    2.2. if it OBJECTS:
+    2.2.1. check "From" and "To" in `objects`
+    2.2.2. find link type -> find "From" type and "To" type -> find link
+ 3. send all types
+ 4. send all objects
+ 5. send all links
+*/
 func (d *dispatcher) Compile() error {
 	d.m.Lock()
 	defer d.m.Unlock()
@@ -139,21 +153,19 @@ func (d *dispatcher) Compile() error {
 	return nil
 }
 
-/*
- 0. maybe validate all names
- 1. check that all object's types exists
- 2. check links:
-    2.1. if it TYPES:
-    2.1.1. check "From" and "To" in `types`
-    2.1.2. check that link type is not empty
-    2.2. if it OBJECTS:
-    2.2.1. check "From" and "To" in `objects`
-    2.2.2. find link type -> find "From" type and "To" type -> find link
- 3. send all types
- 4. send all objects
- 5. send all links
-*/
 func (d *dispatcher) compile() error {
+	if err := d.validateAllIDs(); err != nil {
+		return err
+	}
+
+	if err := d.checkObjectsTypeMatching(); err != nil {
+		return fmt.Errorf("object type matching: %w", err)
+	}
+
+	if err := d.buildLinks(); err != nil {
+		return fmt.Errorf("build links: %w", err)
+	}
+
 	return nil
 }
 
@@ -222,6 +234,8 @@ func (d *dispatcher) createLink(mode linkMode, from, to, linkType, objectLinkTyp
 }
 
 func (d *dispatcher) initBuilInObjects() error {
+	d.types["builtin"] = struct{}{}
+
 	// create root
 	if err := d.createObject(BUILT_IN_ROOT, "builtin", easyjson.NewJSONObject().GetPtr()); err != nil {
 		return err
@@ -268,8 +282,6 @@ func (d *dispatcher) processTypes() {
 			continue
 		}
 
-		fmt.Printf("ttype: %v\n", ttype)
-
 		if err := d.createFoliageObject(ttype.id, ttype.body); err != nil {
 			slog.Error("Cannot create type", "id", ttype.id)
 			continue
@@ -287,8 +299,6 @@ func (d *dispatcher) processObjects() {
 			continue
 		}
 
-		fmt.Printf("object: %+v\n", object)
-
 		if err := d.createFoliageObject(object.id, object.body); err != nil {
 			slog.Error("Cannot create Foliage object", "id", object.id)
 			continue
@@ -305,8 +315,6 @@ func (d *dispatcher) processLinks() {
 		if link == nil {
 			continue
 		}
-
-		fmt.Printf("link: %+v\n", link)
 
 		body := easyjson.NewJSONObject()
 		if link.ObjectType != "" {
@@ -359,4 +367,62 @@ func (d *dispatcher) sendLinks() {
 	for _, link := range d.links {
 		d.linksWorker.Send(link)
 	}
+}
+
+func (d *dispatcher) validateAllIDs() error {
+	return nil
+}
+
+func (d *dispatcher) checkObjectsTypeMatching() error {
+	for objectID, typeID := range d.objects {
+		if _, ok := d.types[typeID]; !ok {
+			return fmt.Errorf("object '%s' missmatching with '%s' type", objectID, typeID)
+		}
+	}
+	return nil
+}
+
+func (d *dispatcher) buildLinks() error {
+	for id, link := range d.links {
+		_, fromTypeExists := d.types[link.From]
+		_, fromObjectExists := d.objects[link.From]
+		if !fromObjectExists && !fromTypeExists {
+			return fmt.Errorf("%s exists neither in types nor in objects", link.From)
+		}
+
+		_, toTypeExists := d.types[link.To]
+		_, toObjectExists := d.objects[link.To]
+		if !toTypeExists && !toObjectExists {
+			return fmt.Errorf("%s exists neither in types nor in objects", link.To)
+		}
+
+		if link.Type == "" {
+			return fmt.Errorf("%s missed type", id)
+		}
+
+		switch link.mode {
+		case _DEFINED:
+		case _UNDEFINED:
+			objectTypeFrom := d.objects[link.From]
+			objectTypeTo := d.objects[link.To]
+			linkID := objectTypeFrom + "/" + objectTypeTo
+
+			findLink, ok := d.links[linkID]
+			if !ok {
+				return fmt.Errorf("can't find link type between %s", linkID)
+			}
+
+			if findLink.ObjectType == "" {
+				return fmt.Errorf("%s object link type is empty", linkID)
+			}
+
+			d.links[id] = &_link{
+				mode: _DEFINED,
+				From: link.From,
+				To:   link.To,
+				Type: findLink.ObjectType,
+			}
+		}
+	}
+	return nil
 }
