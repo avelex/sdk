@@ -6,7 +6,6 @@ require (
 	github.com/PaesslerAG/gval v1.2.2
 	github.com/foliagecp/easyjson v0.1.0
 	github.com/goccy/go-graphviz v0.1.1
-	github.com/google/uuid v1.3.1
 	github.com/nats-io/nats.go v1.28.0
 	rogchap.com/v8go v0.9.0
 )

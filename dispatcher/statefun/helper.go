@@ -1,4 +1,4 @@
-package dispatcher
+package statefun
 
 import (
 	"fmt"
@@ -6,17 +6,17 @@ import (
 	"github.com/foliagecp/easyjson"
 )
 
-func (d *dispatcher) createFoliageObject(id string, payload *easyjson.JSON) error {
+func (h *handler) createFoliageObject(id string, payload *easyjson.JSON) error {
 	const typename = "functions.graph.ll.api.object.create"
 
-	if _, err := d.runtime.IngressGolangSync(typename, id, payload, nil); err != nil {
+	if _, err := h.runtime.IngressGolangSync(typename, id, payload, nil); err != nil {
 		return fmt.Errorf("dispatcher create object: %w", err)
 	}
 
 	return nil
 }
 
-func (d *dispatcher) createFoliageLink(from, to, linkType string, linkBody *easyjson.JSON, tags ...string) error {
+func (h *handler) createFoliageLink(from, to, linkType string, linkBody *easyjson.JSON, tags ...string) error {
 	const typename = "functions.graph.ll.api.link.create"
 
 	link := easyjson.NewJSONObject()
@@ -33,7 +33,7 @@ func (d *dispatcher) createFoliageLink(from, to, linkType string, linkBody *easy
 		link.SetByPath("link_body.tags", easyjson.JSONFromArray(tags))
 	}
 
-	if _, err := d.runtime.IngressGolangSync(typename, from, &link, nil); err != nil {
+	if _, err := h.runtime.IngressGolangSync(typename, from, &link, nil); err != nil {
 		return fmt.Errorf("dispatcher create link: %w", err)
 	}
 
