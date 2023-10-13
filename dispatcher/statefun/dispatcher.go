@@ -45,7 +45,7 @@ func RegisterAllFunctionTypes(runtime *statefun.Runtime) {
 
 /*
 	adapter --> 		begin 		 	  --> main_dipatcher
- 	adapter <--   slave_dispatcher_id     <-- main_dipatcher
+ 	adapter <--   work_dispatcher_id     <-- main_dipatcher
 	adapter --> 	     add 			  --> work_dispatcher
 	adapter --> 	     add 			  --> work_dispatcher
 	adapter --> 	     add 			  --> work_dispatcher
@@ -63,25 +63,32 @@ func (h *handler) begin(executor sfplugins.StatefunExecutor, contextProcessor *s
 	obj := contextProcessor.GetObjectContext()
 
 	source := obj.GetByPath("source").AsStringDefault("")
+	if source == "" {
+		if tempDir, err := os.MkdirTemp("", "fc*"); err == nil {
+			source = tempDir
+			obj.SetByPath("source", easyjson.NewJSON(source))
+		}
+	}
+
 	nonce := int(obj.GetByPath("nonce").AsNumericDefault(0))
 	nonce++
 	obj.SetByPath("nonce", easyjson.NewJSON(nonce))
 
 	contextProcessor.SetObjectContext(obj)
 
-	hash := sha256.Sum256([]byte(self.ID + strconv.Itoa(nonce)))
-	slaveDispatcherID := hex.EncodeToString(hash[:])
-	slaveDispatcherSource := filepath.Join(source, slaveDispatcherID)
+	hash := sha256.Sum256([]byte(self.ID + strconv.Itoa(nonce) + strconv.Itoa(int(system.GetCurrentTimeNs()))))
+	workDispatcherID := hex.EncodeToString(hash[:])
+	workDispatcherSource := filepath.Join(source, workDispatcherID)
 
 	body := easyjson.NewJSONObject()
-	body.SetByPath("body.id", easyjson.NewJSON(slaveDispatcherID))
+	body.SetByPath("body.id", easyjson.NewJSON(workDispatcherID))
 	body.SetByPath("body.createdAt", easyjson.NewJSON(system.GetCurrentTimeNs()))
 	body.SetByPath("body.links", easyjson.NewJSONObject())
 	body.SetByPath("body.types", easyjson.NewJSONObject())
 	body.SetByPath("body.objects", easyjson.NewJSONObject())
-	body.SetByPath("body.source", easyjson.NewJSON(slaveDispatcherSource))
+	body.SetByPath("body.source", easyjson.NewJSON(workDispatcherSource))
 
-	_, err := contextProcessor.GolangCallSync("functions.graph.ll.api.object.create", slaveDispatcherID, &body, nil)
+	_, err := contextProcessor.GolangCallSync("functions.graph.ll.api.object.create", workDispatcherID, &body, nil)
 	if err != nil {
 		slog.Error(err.Error())
 		return
@@ -89,14 +96,14 @@ func (h *handler) begin(executor sfplugins.StatefunExecutor, contextProcessor *s
 
 	// TODO: add link main_dispatcher -> work_dispatcher
 
-	if err := os.MkdirAll(slaveDispatcherSource, os.ModeDir|0700); err != nil {
+	if err := os.MkdirAll(workDispatcherSource, os.ModeDir|0700); err != nil {
 		log.Println(err)
 	}
 
 	qid := common.GetQueryID(contextProcessor)
 
 	payload := easyjson.NewJSONObject()
-	payload.SetByPath("payload.id", easyjson.NewJSON(slaveDispatcherID))
+	payload.SetByPath("payload.id", easyjson.NewJSON(workDispatcherID))
 
 	common.ReplyQueryID(qid, &payload, contextProcessor)
 }
@@ -242,7 +249,7 @@ func (h *handler) commit(executor sfplugins.StatefunExecutor, contextProcessor *
 	if err1 := cmp.compile(); err1 != nil {
 		reply := easyjson.NewJSONObject()
 		reply.SetByPath("payload.status", easyjson.NewJSON("failed"))
-		reply.SetByPath("payload.result", easyjson.NewJSON(fmt.Errorf("compile: %w", err1)))
+		reply.SetByPath("payload.result", easyjson.NewJSON(fmt.Errorf("compile: %w", err1).Error()))
 		common.ReplyQueryID(qid, &reply, contextProcessor)
 		return
 	}

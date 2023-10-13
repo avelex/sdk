@@ -6,8 +6,13 @@ import (
 	"github.com/foliagecp/easyjson"
 )
 
-func (h *handler) createFoliageObject(id string, payload *easyjson.JSON) error {
+func (h *handler) createFoliageObject(id string, body *easyjson.JSON) error {
 	const typename = "functions.graph.ll.api.object.create"
+
+	payload := body
+	if !body.PathExists("body") {
+		payload = easyjson.NewJSONObjectWithKeyValue("body", *body).GetPtr()
+	}
 
 	if _, err := h.runtime.IngressGolangSync(typename, id, payload, nil); err != nil {
 		return fmt.Errorf("dispatcher create object: %w", err)
